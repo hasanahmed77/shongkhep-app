@@ -12,6 +12,7 @@ import {
 import {
   Animated,
   ActivityIndicator,
+  Alert,
   Dimensions,
   FlatList,
   ImageBackground,
@@ -160,6 +161,80 @@ function NewsScreen({
   );
 }
 
+function EmptyNewsScreen({
+  viewportHeight,
+  onOpenMenu,
+  onReload,
+}: {
+  viewportHeight: number;
+  onOpenMenu: () => void;
+  onReload: () => void;
+}) {
+  const gestureProgress = useRef(new Animated.Value(0)).current;
+
+  const animateGestureBack = () => {
+    Animated.timing(gestureProgress, {
+      toValue: 0,
+      duration: 140,
+      useNativeDriver: true,
+    }).start();
+  };
+
+  const panResponder = useRef(
+    PanResponder.create({
+      onMoveShouldSetPanResponder: (_, gestureState) =>
+        Math.abs(gestureState.dx) > 18 && Math.abs(gestureState.dy) < 24,
+      onPanResponderMove: (_, gestureState) => {
+        const progress = Math.min(Math.max(gestureState.dx, 0) / 100, 1);
+        gestureProgress.setValue(progress);
+      },
+      onPanResponderRelease: (_, gestureState) => {
+        if (gestureState.dx > 90) {
+          animateGestureBack();
+          onOpenMenu();
+          return;
+        }
+
+        animateGestureBack();
+      },
+      onPanResponderTerminate: animateGestureBack,
+    }),
+  ).current;
+
+  return (
+    <Animated.View
+      style={[
+        styles.screen,
+        { height: viewportHeight },
+        {
+          opacity: gestureProgress.interpolate({
+            inputRange: [0, 1],
+            outputRange: [1, 0.97],
+          }),
+          transform: [
+            {
+              scale: gestureProgress.interpolate({
+                inputRange: [0, 1],
+                outputRange: [1, 0.992],
+              }),
+            },
+          ],
+        },
+      ]}
+      {...panResponder.panHandlers}
+    >
+      <View style={styles.cardShell}>
+        <View style={styles.emptyCard}>
+          <Text style={styles.emptyCardTitle}>No such news.</Text>
+          <Pressable style={styles.emptyCardButton} onPress={onReload}>
+            <Ionicons name="refresh" size={22} color="#FFFFFF" />
+          </Pressable>
+        </View>
+      </View>
+    </Animated.View>
+  );
+}
+
 function AppContent() {
   const insets = useSafeAreaInsets();
   const listRef = useRef<FlatList<NewsCard>>(null);
@@ -217,10 +292,17 @@ function AppContent() {
       }
 
       try {
-        await syncNewsFeed();
+        await syncNewsFeed(language, selectedCategory);
         const result = await fetchNewsFeed(language, selectedCategory);
         setNews(result.articles);
         listRef.current?.scrollToOffset({ offset: 0, animated: false });
+      } catch (error) {
+        console.warn("Failed to refresh news feed", error);
+        setNews([]);
+        Alert.alert(
+          "Feed unavailable",
+          `Could not load the ${language === "en" ? "English" : "Bangla"} feed right now.`,
+        );
       } finally {
         if (silent) {
           setIsRefreshing(false);
@@ -309,12 +391,13 @@ function AppContent() {
               index,
             })}
             ListEmptyComponent={
-              <View style={styles.emptyState}>
-                <Text style={styles.emptyStateTitle}>No stories in this category</Text>
-                <Text style={styles.emptyStateText}>
-                  Switch categories from the right-side menu or change language.
-                </Text>
-              </View>
+              <EmptyNewsScreen
+                viewportHeight={viewportHeight}
+                onOpenMenu={() => toggleDrawer(true)}
+                onReload={() => {
+                  void refreshFeed({ silent: true });
+                }}
+              />
             }
           />
         )}
@@ -538,9 +621,10 @@ const styles = StyleSheet.create({
   },
   headline: {
     color: "#FFFFFF",
-    fontSize: 30,
-    lineHeight: 36,
-    fontWeight: "800",
+    fontSize: 25,
+    lineHeight: 31,
+    fontWeight: "400",
+    fontStyle: "italic",
     letterSpacing: -0.6,
   },
   summary: {
@@ -548,6 +632,7 @@ const styles = StyleSheet.create({
     fontSize: 17,
     lineHeight: 27,
     marginTop: 16,
+    fontWeight: "300",
   },
   footerRow: {
     flexDirection: "row",
@@ -693,23 +778,35 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: "#000000",
   },
-  emptyState: {
-    height,
+  emptyCard: {
+    flex: 1,
     alignItems: "center",
     justifyContent: "center",
     paddingHorizontal: 32,
+    backgroundColor: "#050505",
+    borderRadius: 28,
+    borderWidth: 1,
+    borderColor: "#151515",
+    marginHorizontal: 14,
+    marginVertical: 14,
   },
-  emptyStateTitle: {
+  emptyCardTitle: {
     color: "#FFFFFF",
     fontSize: 24,
-    fontWeight: "800",
+    fontWeight: "500",
+    fontStyle: "italic",
   },
-  emptyStateText: {
-    color: "#A5A5A5",
-    fontSize: 16,
-    lineHeight: 25,
-    marginTop: 10,
-    textAlign: "center",
+  emptyCardButton: {
+    marginTop: 24,
+    minWidth: 52,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 18,
+    paddingVertical: 10,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: "#2A2A2A",
+    backgroundColor: "#0A0A0A",
   },
   loadingState: {
     flex: 1,

@@ -1,6 +1,10 @@
 import { Platform } from "react-native";
-import { ENDPOINTS, newsByLanguage } from "../data/news";
 import { Category, Language, NewsCard } from "../types";
+
+const ENDPOINTS: Record<Language, string> = {
+  en: "/news/en",
+  bn: "/news/bn",
+};
 
 const API_BASE_URL =
   process.env.EXPO_PUBLIC_API_BASE_URL ??
@@ -26,8 +30,17 @@ type FeedResponse = {
   articles: FeedArticle[];
 };
 
-export async function syncNewsFeed(): Promise<void> {
-  const url = `${API_BASE_URL}/news/sync-now`;
+export async function syncNewsFeed(
+  language: Language,
+  category: Category,
+): Promise<void> {
+  const params = new URLSearchParams({
+    language,
+  });
+  if (category !== "All") {
+    params.set("category", category);
+  }
+  const url = `${API_BASE_URL}/news/sync-now?${params.toString()}`;
   const response = await fetch(url, { method: "POST" });
   if (!response.ok) {
     throw new Error(`Sync request failed with status ${response.status}`);
@@ -40,30 +53,17 @@ export async function fetchNewsFeed(
 ): Promise<{ articles: NewsCard[]; endpointLabel: string; fallback: boolean }> {
   const query = category === "All" ? "" : `?category=${encodeURIComponent(category)}`;
   const url = `${API_BASE_URL}${ENDPOINTS[language]}${query}`;
-
-  try {
-    const response = await fetch(url);
-    if (!response.ok) {
-      throw new Error(`Feed request failed with status ${response.status}`);
-    }
-
-    const payload = (await response.json()) as FeedResponse;
-    return {
-      articles: payload.articles.map(mapFeedArticle),
-      endpointLabel: `${ENDPOINTS[language]}${query}`,
-      fallback: false,
-    };
-  } catch (error) {
-    console.warn(`Failed to fetch feed from ${url}`, error);
-    const fallbackArticles = newsByLanguage[language].filter((item) =>
-      category === "All" ? true : item.category === category,
-    );
-    return {
-      articles: fallbackArticles,
-      endpointLabel: `${ENDPOINTS[language]} (fallback)`,
-      fallback: true,
-    };
+  const response = await fetch(url);
+  if (!response.ok) {
+    throw new Error(`Feed request failed with status ${response.status}`);
   }
+
+  const payload = (await response.json()) as FeedResponse;
+  return {
+    articles: payload.articles.map(mapFeedArticle),
+    endpointLabel: `${ENDPOINTS[language]}${query}`,
+    fallback: false,
+  };
 }
 
 function mapFeedArticle(article: FeedArticle): NewsCard {
