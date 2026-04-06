@@ -17,7 +17,8 @@
     },
     "androidNavigationBar": {
       "backgroundColor": "#000000",
-      "barStyle": "light-content"
+      "barStyle": "light-content",
+      "visible": "immersive"
     },
     "ios": {
       "supportsTablet": true

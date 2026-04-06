@@ -1,6 +1,7 @@
 import { LinearGradient } from "expo-linear-gradient";
 import * as NavigationBar from "expo-navigation-bar";
 import { StatusBar } from "expo-status-bar";
+import * as SystemUI from "expo-system-ui";
 import { Feather, Ionicons } from "@expo/vector-icons";
 import React, { useRef, useState } from "react";
 import {
@@ -26,7 +27,7 @@ import {
   View,
 } from "react-native";
 import { WebView } from "react-native-webview";
-import { fetchNewsFeed } from "./src/api/newsApi";
+import { fetchNewsFeed, syncNewsFeed } from "./src/api/newsApi";
 import { Category, Language, NewsCard } from "./src/types";
 
 const { height, width } = Dimensions.get("window");
@@ -39,70 +40,6 @@ const categories: Category[] = [
   "Technology",
   "Sports",
 ];
-
-function buildArticleHtml(article: NewsCard) {
-  return `
-    <!DOCTYPE html>
-    <html lang="en">
-      <head>
-        <meta charset="UTF-8" />
-        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-        <style>
-          body {
-            margin: 0;
-            padding: 24px;
-            background: #000000;
-            color: #ffffff;
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-          }
-          .eyebrow {
-            color: #ffffff;
-            font-size: 12px;
-            font-weight: 700;
-            letter-spacing: 1.4px;
-            text-transform: uppercase;
-            margin-bottom: 12px;
-          }
-          h1 {
-            margin: 0 0 16px;
-            font-size: 34px;
-            line-height: 1.15;
-          }
-          .meta {
-            color: #a0a0a0;
-            font-size: 14px;
-            margin-bottom: 24px;
-          }
-          img {
-            width: 100%;
-            border-radius: 22px;
-            margin-bottom: 24px;
-          }
-          p {
-            color: #d0d0d0;
-            font-size: 19px;
-            line-height: 1.8;
-            margin: 0 0 18px;
-          }
-          a {
-            color: #ffffff;
-          }
-        </style>
-      </head>
-      <body>
-        <div class="eyebrow">${article.category}</div>
-        <h1>${article.title}</h1>
-        <div class="meta">Source: ${article.sourceName}</div>
-        <img src="${article.imageUrl}" alt="${article.title}" />
-        ${article.articleBody
-          .split("\n\n")
-          .map((paragraph) => `<p>${paragraph}</p>`)
-          .join("")}
-        <p><a href="${article.sourceUrl}">Publisher link</a></p>
-      </body>
-    </html>
-  `;
-}
 
 function NewsScreen({
   item,
@@ -201,19 +138,19 @@ function NewsScreen({
             </Pressable>
 
             <View style={styles.actionRow}>
-              <Pressable style={styles.shareButton} onPress={onReload}>
-                <Feather name="rotate-cw" size={18} color="#FFFFFF" />
+              <Pressable style={styles.iconAction} onPress={onReload}>
+                <Ionicons name="refresh" size={22} color="#FFFFFF" />
               </Pressable>
 
               <Pressable
-                style={styles.shareButton}
+                style={styles.iconAction}
                 onPress={() =>
                   Share.share({
                     message: `${item.title}\n\n${item.summary}\n\nSource: ${item.sourceUrl}`,
                   })
                 }
               >
-                <Feather name="share-2" size={20} color="#FFFFFF" />
+                <Ionicons name="share-social-outline" size={22} color="#FFFFFF" />
               </Pressable>
             </View>
           </View>
@@ -280,6 +217,7 @@ function AppContent() {
       }
 
       try {
+        await syncNewsFeed();
         const result = await fetchNewsFeed(language, selectedCategory);
         setNews(result.articles);
         listRef.current?.scrollToOffset({ offset: 0, animated: false });
@@ -299,6 +237,10 @@ function AppContent() {
   }, [refreshFeed]);
 
   React.useEffect(() => {
+    void SystemUI.setBackgroundColorAsync("#000000");
+  }, []);
+
+  React.useEffect(() => {
     if (Platform.OS !== "android") {
       return;
     }
@@ -310,11 +252,11 @@ function AppContent() {
   }, []);
 
   return (
-    <SafeAreaView style={styles.safeArea} edges={["top", "bottom"]}>
-      <StatusBar style="light" />
+    <SafeAreaView style={styles.safeArea} edges={[]}>
+      <StatusBar style="light" translucent={false} backgroundColor="#000000" />
 
       <View
-        style={styles.app}
+        style={[styles.app, { paddingTop: insets.top }]}
         onLayout={(event) => {
           const nextHeight = event.nativeEvent.layout.height;
           if (Math.abs(nextHeight - viewportHeight) > 1) {
@@ -499,7 +441,7 @@ function AppContent() {
                 style={styles.webviewBackButton}
                 onPress={() => setSourceArticle(null)}
               >
-                <Feather name="arrow-left" size={18} color="#000000" />
+                <Feather name="chevron-left" size={26} color="#FFFFFF" />
               </Pressable>
 
               <View style={styles.webviewTitleWrap}>
@@ -513,7 +455,7 @@ function AppContent() {
             </View>
 
             {sourceArticle ? (
-              <WebView source={{ html: buildArticleHtml(sourceArticle) }} />
+              <WebView source={{ uri: sourceArticle.sourceUrl }} />
             ) : null}
           </SafeAreaView>
         </Modal>
@@ -522,7 +464,7 @@ function AppContent() {
           pointerEvents="none"
           style={[
             styles.bottomInsetCover,
-            { height: Math.max(insets.bottom, 16) + 20 },
+            { height: Math.max(insets.bottom, 8) },
           ]}
         />
       </View>
@@ -557,6 +499,7 @@ const styles = StyleSheet.create({
     right: 0,
     bottom: 0,
     backgroundColor: "#000000",
+    zIndex: 1,
   },
   screen: {
     height,
@@ -611,19 +554,19 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "space-between",
     marginTop: 28,
-    paddingHorizontal: 4,
+    paddingHorizontal: 18,
     paddingBottom: 8,
   },
   actionRow: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 10,
+    gap: 14,
   },
   sourceBlock: {
     flexDirection: "row",
     alignItems: "center",
     gap: 9,
-    maxWidth: "76%",
+    maxWidth: "68%",
   },
   sourceMeta: {
     color: "#737373",
@@ -639,15 +582,11 @@ const styles = StyleSheet.create({
     fontWeight: "700",
     textDecorationLine: "underline",
   },
-  shareButton: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: "#0D0D0D",
+  iconAction: {
+    paddingVertical: 6,
+    paddingHorizontal: 2,
     alignItems: "center",
     justifyContent: "center",
-    borderWidth: 1,
-    borderColor: "#202020",
   },
   drawerOverlay: {
     ...StyleSheet.absoluteFillObject,
@@ -802,12 +741,10 @@ const styles = StyleSheet.create({
     borderColor: "#1B1B1B",
   },
   webviewBackButton: {
-    width: 42,
-    height: 42,
-    borderRadius: 21,
+    paddingVertical: 4,
+    paddingRight: 4,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "#FFFFFF",
   },
   webviewTitleWrap: {
     flex: 1,

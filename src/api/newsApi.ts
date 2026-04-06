@@ -26,6 +26,14 @@ type FeedResponse = {
   articles: FeedArticle[];
 };
 
+export async function syncNewsFeed(): Promise<void> {
+  const url = `${API_BASE_URL}/news/sync-now`;
+  const response = await fetch(url, { method: "POST" });
+  if (!response.ok) {
+    throw new Error(`Sync request failed with status ${response.status}`);
+  }
+}
+
 export async function fetchNewsFeed(
   language: Language,
   category: Category,
