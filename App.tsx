@@ -42,6 +42,59 @@ const categories: Category[] = [
   "Sports",
 ];
 
+function shouldOpenMenuSwipe(dx: number, dy: number, vx: number) {
+  const horizontalDistance = Math.abs(dx);
+  const verticalDistance = Math.abs(dy);
+
+  if (dx <= 0) {
+    return false;
+  }
+
+  return (
+    (horizontalDistance > 14 && horizontalDistance > verticalDistance * 1.35) ||
+    (horizontalDistance > 10 && vx > 0.3 && horizontalDistance > verticalDistance * 1.1)
+  );
+}
+
+function createMenuSwipePanResponder({
+  gestureProgress,
+  onOpenMenu,
+}: {
+  gestureProgress: Animated.Value;
+  onOpenMenu: () => void;
+}) {
+  const animateGestureBack = () => {
+    Animated.timing(gestureProgress, {
+      toValue: 0,
+      duration: 140,
+      useNativeDriver: true,
+    }).start();
+  };
+
+  return PanResponder.create({
+    onStartShouldSetPanResponder: () => false,
+    onStartShouldSetPanResponderCapture: () => false,
+    onMoveShouldSetPanResponder: (_, gestureState) =>
+      shouldOpenMenuSwipe(gestureState.dx, gestureState.dy, gestureState.vx),
+    onMoveShouldSetPanResponderCapture: (_, gestureState) =>
+      shouldOpenMenuSwipe(gestureState.dx, gestureState.dy, gestureState.vx),
+    onPanResponderMove: (_, gestureState) => {
+      const progress = Math.min(Math.max(gestureState.dx, 0) / 100, 1);
+      gestureProgress.setValue(progress);
+    },
+    onPanResponderRelease: (_, gestureState) => {
+      if (gestureState.dx > 84 || (gestureState.dx > 42 && gestureState.vx > 0.42)) {
+        animateGestureBack();
+        onOpenMenu();
+        return;
+      }
+
+      animateGestureBack();
+    },
+    onPanResponderTerminate: animateGestureBack,
+  });
+}
+
 function NewsScreen({
   item,
   viewportHeight,
@@ -60,32 +113,10 @@ function NewsScreen({
     onOpenSource(item);
   };
 
-  const animateGestureBack = () => {
-    Animated.timing(gestureProgress, {
-      toValue: 0,
-      duration: 140,
-      useNativeDriver: true,
-    }).start();
-  };
-
-  const panResponder = useRef(
-    PanResponder.create({
-      onMoveShouldSetPanResponder: (_, gestureState) =>
-        Math.abs(gestureState.dx) > 18 && Math.abs(gestureState.dy) < 24,
-      onPanResponderMove: (_, gestureState) => {
-        const progress = Math.min(Math.max(gestureState.dx, 0) / 100, 1);
-        gestureProgress.setValue(progress);
-      },
-      onPanResponderRelease: (_, gestureState) => {
-        if (gestureState.dx > 90) {
-          animateGestureBack();
-          onOpenMenu();
-          return;
-        }
-
-        animateGestureBack();
-      },
-      onPanResponderTerminate: animateGestureBack,
+  const edgePanResponder = useRef(
+    createMenuSwipePanResponder({
+      gestureProgress,
+      onOpenMenu,
     }),
   ).current;
 
@@ -109,7 +140,7 @@ function NewsScreen({
           ],
         },
       ]}
-      {...panResponder.panHandlers}
+      {...edgePanResponder.panHandlers}
     >
       <View style={styles.cardShell}>
         <ImageBackground source={{ uri: item.imageUrl }} style={styles.heroImage}>
@@ -171,33 +202,10 @@ function EmptyNewsScreen({
   onReload: () => void;
 }) {
   const gestureProgress = useRef(new Animated.Value(0)).current;
-
-  const animateGestureBack = () => {
-    Animated.timing(gestureProgress, {
-      toValue: 0,
-      duration: 140,
-      useNativeDriver: true,
-    }).start();
-  };
-
-  const panResponder = useRef(
-    PanResponder.create({
-      onMoveShouldSetPanResponder: (_, gestureState) =>
-        Math.abs(gestureState.dx) > 18 && Math.abs(gestureState.dy) < 24,
-      onPanResponderMove: (_, gestureState) => {
-        const progress = Math.min(Math.max(gestureState.dx, 0) / 100, 1);
-        gestureProgress.setValue(progress);
-      },
-      onPanResponderRelease: (_, gestureState) => {
-        if (gestureState.dx > 90) {
-          animateGestureBack();
-          onOpenMenu();
-          return;
-        }
-
-        animateGestureBack();
-      },
-      onPanResponderTerminate: animateGestureBack,
+  const edgePanResponder = useRef(
+    createMenuSwipePanResponder({
+      gestureProgress,
+      onOpenMenu,
     }),
   ).current;
 
@@ -221,7 +229,7 @@ function EmptyNewsScreen({
           ],
         },
       ]}
-      {...panResponder.panHandlers}
+      {...edgePanResponder.panHandlers}
     >
       <View style={styles.cardShell}>
         <View style={styles.emptyCard}>
