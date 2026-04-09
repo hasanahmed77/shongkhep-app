@@ -1,5 +1,5 @@
 import { Platform } from "react-native";
-import { Category, Language, NewsCard } from "../types";
+import { Category, Language, NewsCard, Vertical } from "../types";
 
 const ENDPOINTS: Record<Language, string> = {
   en: "/news/en",
@@ -15,6 +15,7 @@ const API_BASE_URL =
 type FeedArticle = {
   id: string;
   cursor: string;
+  vertical: string;
   category: string;
   image_url: string | null;
   source_name: string;
@@ -48,10 +49,12 @@ type FetchFeedOptions = {
 
 export async function syncNewsFeed(
   language: Language,
+  vertical: Vertical,
   category: Category,
 ): Promise<void> {
   const params = new URLSearchParams({
     language,
+    vertical,
   });
   if (category !== "All") {
     params.set("category", category);
@@ -65,6 +68,7 @@ export async function syncNewsFeed(
 
 export async function fetchNewsFeed(
   language: Language,
+  vertical: Vertical,
   category: Category,
   options: FetchFeedOptions = {},
 ): Promise<{
@@ -75,6 +79,7 @@ export async function fetchNewsFeed(
   nextCursor: string | null;
 }> {
   const params = new URLSearchParams();
+  params.set("vertical", vertical);
   if (category !== "All") {
     params.set("category", category);
   }
@@ -104,10 +109,11 @@ export async function fetchNewsFeed(
 
 export async function fetchFeedUpdates(
   language: Language,
+  vertical: Vertical,
   category: Category,
   after: string,
 ): Promise<{ hasNew: boolean; newCount: number; latestCursor: string | null }> {
-  const params = new URLSearchParams({ after });
+  const params = new URLSearchParams({ after, vertical });
   if (category !== "All") {
     params.set("category", category);
   }
@@ -125,10 +131,12 @@ export async function fetchFeedUpdates(
 }
 
 function mapFeedArticle(article: FeedArticle): NewsCard {
+  const vertical = normalizeVertical(article.vertical);
   return {
     id: article.id,
     cursor: article.cursor,
-    category: normalizeCategory(article.category),
+    vertical,
+    category: normalizeCategory(article.category, vertical),
     imageUrl:
       article.image_url ??
       "https://images.unsplash.com/photo-1495020689067-958852a7765e?auto=format&fit=crop&w=1200&q=80",
@@ -141,7 +149,39 @@ function mapFeedArticle(article: FeedArticle): NewsCard {
   };
 }
 
-function normalizeCategory(category: string): NewsCard["category"] {
-  const allowed = new Set(["World", "Politics", "Business", "Technology", "Sports"]);
-  return allowed.has(category) ? (category as NewsCard["category"]) : "World";
+function normalizeCategory(category: string, vertical: Vertical): NewsCard["category"] {
+  const allowed = new Set([
+    "World",
+    "Politics",
+    "Business",
+    "Technology",
+    "Sports",
+    "AI",
+    "Startups",
+    "Devices",
+    "Platforms",
+    "Space",
+    "Research",
+    "Health",
+    "Climate",
+    "Releases",
+    "Sales",
+    "Platform News",
+    "Reviews",
+  ]);
+  if (allowed.has(category)) {
+    return category;
+  }
+  const defaults: Record<Vertical, NewsCard["category"]> = {
+    news: "World",
+    tech: "AI",
+    science: "Research",
+    gaming: "Platform News",
+  };
+  return defaults[vertical];
+}
+
+function normalizeVertical(vertical: string): NewsCard["vertical"] {
+  const allowed = new Set(["news", "tech", "science", "gaming"]);
+  return allowed.has(vertical) ? (vertical as NewsCard["vertical"]) : "news";
 }

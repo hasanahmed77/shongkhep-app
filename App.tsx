@@ -29,18 +29,23 @@ import {
 } from "react-native";
 import { WebView } from "react-native-webview";
 import { fetchFeedUpdates, fetchNewsFeed } from "./src/api/newsApi";
-import { Category, Language, NewsCard } from "./src/types";
+import { Category, Language, NewsCard, Vertical } from "./src/types";
 
 const { height, width } = Dimensions.get("window");
 const DRAWER_WIDTH = Math.min(width * 0.82, 320);
-const categories: Category[] = [
-  "All",
-  "World",
-  "Politics",
-  "Business",
-  "Technology",
-  "Sports",
+const verticals: { id: Vertical; label: string }[] = [
+  { id: "news", label: "News" },
+  { id: "tech", label: "Tech" },
+  { id: "science", label: "Science" },
+  { id: "gaming", label: "Gaming" },
 ];
+
+const categoryOptions: Record<Vertical, Category[]> = {
+  news: ["All", "World", "Politics", "Business", "Technology", "Sports"],
+  tech: ["All", "AI", "Startups", "Devices", "Platforms"],
+  science: ["All", "Space", "Research", "Health", "Climate"],
+  gaming: ["All", "Releases", "Sales", "Platform News", "Reviews"],
+};
 
 function shouldOpenMenuSwipe(dx: number, dy: number, vx: number) {
   const horizontalDistance = Math.abs(dx);
@@ -247,6 +252,8 @@ function AppContent() {
   const insets = useSafeAreaInsets();
   const listRef = useRef<FlatList<NewsCard>>(null);
   const [language, setLanguage] = useState<Language>("en");
+  const [selectedVertical, setSelectedVertical] = useState<Vertical>("news");
+  const [expandedVertical, setExpandedVertical] = useState<Vertical | null>("news");
   const [selectedCategory, setSelectedCategory] = useState<Category>("All");
   const [sourceArticle, setSourceArticle] = useState<NewsCard | null>(null);
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
@@ -263,6 +270,7 @@ function AppContent() {
   const drawerX = useRef(new Animated.Value(-DRAWER_WIDTH)).current;
   const drawerGesture = useRef(new Animated.Value(0)).current;
   const chipVisibility = useRef(new Animated.Value(0)).current;
+  const activeCategories = categoryOptions[selectedVertical];
 
   const toggleDrawer = (open: boolean) => {
     setIsDrawerOpen(open);
@@ -307,7 +315,7 @@ function AppContent() {
       }
 
       try {
-        const result = await fetchNewsFeed(language, selectedCategory, {
+        const result = await fetchNewsFeed(language, selectedVertical, selectedCategory, {
           limit: 10,
         });
         setNews(result.articles);
@@ -324,7 +332,7 @@ function AppContent() {
         setNextCursor(null);
         Alert.alert(
           "Feed unavailable",
-          `Could not load the ${language === "en" ? "English" : "Bangla"} feed right now.`,
+          `Could not load the ${selectedVertical} feed for ${language === "en" ? "English" : "Bangla"} right now.`,
         );
       } finally {
         if (silent) {
@@ -334,7 +342,7 @@ function AppContent() {
         }
       }
     },
-    [language, selectedCategory],
+    [language, selectedCategory, selectedVertical],
   );
 
   const loadMoreFeed = React.useCallback(async () => {
@@ -344,7 +352,7 @@ function AppContent() {
 
     setIsLoadingMore(true);
     try {
-      const result = await fetchNewsFeed(language, selectedCategory, {
+      const result = await fetchNewsFeed(language, selectedVertical, selectedCategory, {
         limit: 10,
         before: nextCursor,
       });
@@ -360,7 +368,7 @@ function AppContent() {
     } finally {
       setIsLoadingMore(false);
     }
-  }, [hasMore, isLoading, isLoadingMore, isRefreshing, language, nextCursor, selectedCategory]);
+  }, [hasMore, isLoading, isLoadingMore, isRefreshing, language, nextCursor, selectedCategory, selectedVertical]);
 
   const applyPendingStories = React.useCallback(
     async ({ scrollToTop = true }: { scrollToTop?: boolean } = {}) => {
@@ -370,7 +378,7 @@ function AppContent() {
       }
 
       try {
-        const result = await fetchNewsFeed(language, selectedCategory, {
+        const result = await fetchNewsFeed(language, selectedVertical, selectedCategory, {
           limit: 20,
           after: latest.cursor,
         });
@@ -391,7 +399,7 @@ function AppContent() {
         listRef.current?.scrollToOffset({ offset: 0, animated: true });
       }
     },
-    [language, news, selectedCategory],
+    [language, news, selectedCategory, selectedVertical],
   );
 
   React.useEffect(() => {
@@ -406,7 +414,7 @@ function AppContent() {
           if (!after) {
             return;
           }
-          const result = await fetchFeedUpdates(language, selectedCategory, after);
+          const result = await fetchFeedUpdates(language, selectedVertical, selectedCategory, after);
           if (!result.hasNew) {
             return;
           }
@@ -423,7 +431,7 @@ function AppContent() {
     }, 30000);
 
     return () => clearInterval(interval);
-  }, [applyPendingStories, currentIndex, isLoading, isLoadingMore, isRefreshing, language, news, selectedCategory]);
+  }, [applyPendingStories, currentIndex, isLoading, isLoadingMore, isRefreshing, language, news, selectedCategory, selectedVertical]);
 
   React.useEffect(() => {
     if (currentIndex === 0 && hasNewStories) {
@@ -642,28 +650,73 @@ function AppContent() {
             </View>
 
             <View style={styles.drawerSection}>
-              <Text style={styles.drawerSectionTitle}>Categories</Text>
-              {categories.map((category) => {
-                const isActive = category === selectedCategory;
+              {verticals.map((vertical) => {
+                const isActive = vertical.id === selectedVertical;
+                const isExpanded = vertical.id === expandedVertical;
+                const categoriesForVertical = categoryOptions[vertical.id];
                 return (
-                  <Pressable
-                    key={category}
-                    style={styles.drawerItem}
-                    onPress={() => {
-                      setSelectedCategory(category);
-                      toggleDrawer(false);
-                    }}
-                  >
-                    <Text
-                      style={[
-                        styles.drawerItemText,
-                        isActive && styles.drawerItemTextActive,
-                      ]}
+                  <View key={vertical.id} style={styles.drawerDropdown}>
+                    <Pressable
+                      style={styles.drawerDropdownHeader}
+                      onPress={() => {
+                        setExpandedVertical((current) =>
+                          current === vertical.id ? null : vertical.id,
+                        );
+                      }}
                     >
-                      {category}
-                    </Text>
-                    {isActive ? <View style={styles.drawerActiveDot} /> : null}
-                  </Pressable>
+                      <View style={styles.drawerDropdownLabelWrap}>
+                        <View
+                          style={[
+                            styles.drawerSelectionBar,
+                            isActive && styles.drawerSelectionBarActive,
+                          ]}
+                        />
+                        <Text
+                          style={[
+                            styles.drawerItemText,
+                            isActive && styles.drawerItemTextActive,
+                          ]}
+                        >
+                          {vertical.label}
+                        </Text>
+                      </View>
+                      <Feather
+                        name={isExpanded ? "chevron-down" : "chevron-right"}
+                        size={16}
+                        color={isActive || isExpanded ? "#D8D8D8" : "#8A8A8A"}
+                      />
+                    </Pressable>
+
+                    {isExpanded ? (
+                      <View style={styles.drawerDropdownBody}>
+                        {categoriesForVertical.map((category) => {
+                          const isCategoryActive = category === selectedCategory;
+                          return (
+                            <Pressable
+                              key={category}
+                              style={styles.drawerSubItem}
+                              onPress={() => {
+                                setSelectedVertical(vertical.id);
+                                setSelectedCategory(category);
+                                setExpandedVertical(vertical.id);
+                                toggleDrawer(false);
+                              }}
+                            >
+                              <Text
+                                style={[
+                                  styles.drawerSubItemText,
+                                  isCategoryActive && styles.drawerSubItemTextActive,
+                                ]}
+                              >
+                                {category}
+                              </Text>
+                              {isCategoryActive ? <View style={styles.drawerActiveDot} /> : null}
+                            </Pressable>
+                          );
+                        })}
+                      </View>
+                    ) : null}
+                  </View>
                 );
               })}
             </View>
@@ -903,6 +956,34 @@ const styles = StyleSheet.create({
   drawerSection: {
     marginTop: 8,
   },
+  drawerDropdown: {
+    borderBottomWidth: 1,
+    borderBottomColor: "#262626",
+  },
+  drawerDropdownHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingVertical: 12,
+  },
+  drawerDropdownLabelWrap: {
+    flexDirection: "row",
+    alignItems: "center",
+    flex: 1,
+  },
+  drawerSelectionBar: {
+    width: 2,
+    height: 16,
+    borderRadius: 999,
+    marginRight: 10,
+    backgroundColor: "transparent",
+  },
+  drawerSelectionBarActive: {
+    backgroundColor: "#E8E8E8",
+  },
+  drawerDropdownBody: {
+    paddingBottom: 8,
+  },
   drawerSectionTitle: {
     color: "#8A8A8A",
     fontSize: 11,
@@ -953,15 +1034,32 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: "#262626",
   },
+  drawerSubItem: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingVertical: 10,
+    paddingLeft: 14,
+  },
   drawerItemText: {
-    color: "#E4E4E4",
+    color: "#9E9E9E",
     fontSize: 16,
-    fontWeight: "500",
+    fontWeight: "400",
   },
   drawerItemTextActive: {
-    fontStyle: "italic",
-    opacity: 0.5,
     color: "#FFFFFF",
+    fontWeight: "600",
+  },
+  drawerSubItemText: {
+    color: "#8D8D8D",
+    fontSize: 12,
+    fontWeight: "400",
+    letterSpacing: 0.3,
+    textTransform: "uppercase",
+  },
+  drawerSubItemTextActive: {
+    color: "#DADADA",
+    fontWeight: "500",
   },
   drawerActiveDot: {
     width: 5,
