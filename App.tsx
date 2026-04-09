@@ -28,7 +28,7 @@ import {
   View,
 } from "react-native";
 import { WebView } from "react-native-webview";
-import { fetchNewsFeed, syncNewsFeed } from "./src/api/newsApi";
+import { fetchFeedUpdates, fetchNewsFeed } from "./src/api/newsApi";
 import { Category, Language, NewsCard } from "./src/types";
 
 const { height, width } = Dimensions.get("window");
@@ -253,9 +253,16 @@ function AppContent() {
   const [news, setNews] = useState<NewsCard[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [isLoadingMore, setIsLoadingMore] = useState(false);
+  const [hasNewStories, setHasNewStories] = useState(false);
+  const [pendingStoryCount, setPendingStoryCount] = useState(0);
+  const [hasMore, setHasMore] = useState(true);
+  const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [viewportHeight, setViewportHeight] = useState(height);
+  const [currentIndex, setCurrentIndex] = useState(0);
   const drawerX = useRef(new Animated.Value(-DRAWER_WIDTH)).current;
   const drawerGesture = useRef(new Animated.Value(0)).current;
+  const chipVisibility = useRef(new Animated.Value(0)).current;
 
   const toggleDrawer = (open: boolean) => {
     setIsDrawerOpen(open);
@@ -300,13 +307,21 @@ function AppContent() {
       }
 
       try {
-        await syncNewsFeed(language, selectedCategory);
-        const result = await fetchNewsFeed(language, selectedCategory);
+        const result = await fetchNewsFeed(language, selectedCategory, {
+          limit: 10,
+        });
         setNews(result.articles);
+        setPendingStoryCount(0);
+        setHasNewStories(false);
+        setHasMore(result.hasMore);
+        setNextCursor(result.nextCursor);
+        setCurrentIndex(0);
         listRef.current?.scrollToOffset({ offset: 0, animated: false });
       } catch (error) {
         console.warn("Failed to refresh news feed", error);
         setNews([]);
+        setHasMore(false);
+        setNextCursor(null);
         Alert.alert(
           "Feed unavailable",
           `Could not load the ${language === "en" ? "English" : "Bangla"} feed right now.`,
@@ -321,6 +336,108 @@ function AppContent() {
     },
     [language, selectedCategory],
   );
+
+  const loadMoreFeed = React.useCallback(async () => {
+    if (isLoading || isRefreshing || isLoadingMore || !hasMore || nextCursor == null) {
+      return;
+    }
+
+    setIsLoadingMore(true);
+    try {
+      const result = await fetchNewsFeed(language, selectedCategory, {
+        limit: 10,
+        before: nextCursor,
+      });
+      setNews((current) => {
+        const seen = new Set(current.map((item) => item.id));
+        const appended = result.articles.filter((item) => !seen.has(item.id));
+        return [...current, ...appended];
+      });
+      setHasMore(result.hasMore);
+      setNextCursor(result.nextCursor);
+    } catch (error) {
+      console.warn("Failed to load more news", error);
+    } finally {
+      setIsLoadingMore(false);
+    }
+  }, [hasMore, isLoading, isLoadingMore, isRefreshing, language, nextCursor, selectedCategory]);
+
+  const applyPendingStories = React.useCallback(
+    async ({ scrollToTop = true }: { scrollToTop?: boolean } = {}) => {
+      const latest = news[0];
+      if (!latest?.cursor) {
+        return;
+      }
+
+      try {
+        const result = await fetchNewsFeed(language, selectedCategory, {
+          limit: 20,
+          after: latest.cursor,
+        });
+        setNews((current) => {
+          const seen = new Set(current.map((item) => item.id));
+          const prepended = result.articles.filter((item) => !seen.has(item.id));
+          return [...prepended, ...current];
+        });
+      } catch (error) {
+        console.warn("Failed to fetch pending stories", error);
+      }
+
+      setPendingStoryCount(0);
+      setHasNewStories(false);
+
+      if (scrollToTop) {
+        setCurrentIndex(0);
+        listRef.current?.scrollToOffset({ offset: 0, animated: true });
+      }
+    },
+    [language, news, selectedCategory],
+  );
+
+  React.useEffect(() => {
+    const interval = setInterval(() => {
+      const latest = news[0];
+      if (!latest || isLoading || isRefreshing || isLoadingMore) {
+        return;
+      }
+      void (async () => {
+        try {
+          const after = latest.cursor;
+          if (!after) {
+            return;
+          }
+          const result = await fetchFeedUpdates(language, selectedCategory, after);
+          if (!result.hasNew) {
+            return;
+          }
+          if (currentIndex === 0) {
+            await applyPendingStories({ scrollToTop: false });
+            return;
+          }
+          setPendingStoryCount(result.newCount);
+          setHasNewStories(true);
+        } catch (error) {
+          console.warn("Failed to poll newer stories", error);
+        }
+      })();
+    }, 30000);
+
+    return () => clearInterval(interval);
+  }, [applyPendingStories, currentIndex, isLoading, isLoadingMore, isRefreshing, language, news, selectedCategory]);
+
+  React.useEffect(() => {
+    if (currentIndex === 0 && hasNewStories) {
+      void applyPendingStories({ scrollToTop: false });
+    }
+  }, [applyPendingStories, currentIndex, hasNewStories]);
+
+  React.useEffect(() => {
+    Animated.timing(chipVisibility, {
+      toValue: hasNewStories && currentIndex > 0 ? 1 : 0,
+      duration: 180,
+      useNativeDriver: true,
+    }).start();
+  }, [chipVisibility, currentIndex, hasNewStories]);
 
   React.useEffect(() => {
     void refreshFeed();
@@ -354,6 +471,33 @@ function AppContent() {
           }
         }}
       >
+        {hasNewStories ? (
+          <Animated.View
+            pointerEvents={currentIndex > 0 ? "auto" : "none"}
+            style={[
+              styles.newStoriesChipWrap,
+              {
+                opacity: chipVisibility,
+                transform: [
+                  {
+                    translateY: chipVisibility.interpolate({
+                      inputRange: [0, 1],
+                      outputRange: [-10, 0],
+                    }),
+                  },
+                ],
+              },
+            ]}
+          >
+            <Pressable style={styles.newStoriesChip} onPress={() => void applyPendingStories()}>
+              <Ionicons name="arrow-up" size={14} color="#050505" />
+              <Text style={styles.newStoriesChipText}>
+                {pendingStoryCount} new {pendingStoryCount === 1 ? "story" : "stories"}
+              </Text>
+            </Pressable>
+          </Animated.View>
+        ) : null}
+
         {isLoading ? (
           <View style={styles.loadingState}>
             <ActivityIndicator size="large" color="#FFFFFF" />
@@ -378,6 +522,13 @@ function AppContent() {
                 }}
               />
             )}
+            onViewableItemsChanged={({ viewableItems }) => {
+              const firstVisible = viewableItems.find((item) => item.isViewable);
+              setCurrentIndex(firstVisible?.index ?? 0);
+            }}
+            viewabilityConfig={{
+              itemVisiblePercentThreshold: 80,
+            }}
             refreshControl={
               <RefreshControl
                 refreshing={isRefreshing}
@@ -398,6 +549,17 @@ function AppContent() {
               offset: viewportHeight * index,
               index,
             })}
+            onEndReachedThreshold={0.6}
+            onEndReached={() => {
+              void loadMoreFeed();
+            }}
+            ListFooterComponent={
+              isLoadingMore ? (
+                <View style={styles.feedFooter}>
+                  <ActivityIndicator size="small" color="#FFFFFF" />
+                </View>
+              ) : null
+            }
             ListEmptyComponent={
               <EmptyNewsScreen
                 viewportHeight={viewportHeight}
@@ -451,13 +613,16 @@ function AppContent() {
             </View>
 
             <Text style={styles.drawerSectionTitle}>Language</Text>
-            <View style={styles.languageRow}>
+            <View style={styles.languageSlider}>
               {(["en", "bn"] as Language[]).map((option) => {
                 const isActive = option === language;
                 return (
                   <Pressable
                     key={option}
-                    style={styles.languageItem}
+                    style={[
+                      styles.languageItem,
+                      isActive && styles.languageItemActive,
+                    ]}
                     onPress={() => {
                       setLanguage(option);
                       toggleDrawer(false);
@@ -583,6 +748,26 @@ const styles = StyleSheet.create({
   app: {
     flex: 1,
     backgroundColor: "#000000",
+  },
+  newStoriesChipWrap: {
+    position: "absolute",
+    top: 12,
+    alignSelf: "center",
+    zIndex: 4,
+  },
+  newStoriesChip: {
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 999,
+    backgroundColor: "#F2F2F2",
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+  },
+  newStoriesChipText: {
+    color: "#050505",
+    fontSize: 13,
+    fontWeight: "700",
   },
   bottomInsetCover: {
     position: "absolute",
@@ -732,18 +917,33 @@ const styles = StyleSheet.create({
     gap: 24,
     marginBottom: 10,
   },
+  languageSlider: {
+    flexDirection: "row",
+    alignItems: "center",
+    padding: 4,
+    marginBottom: 10,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: "#1C1C1C",
+    backgroundColor: "#070707",
+  },
   languageItem: {
-    paddingVertical: 2,
+    flex: 1,
+    paddingVertical: 10,
+    borderRadius: 999,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  languageItemActive: {
+    backgroundColor: "#F2F2F2",
   },
   languageItemText: {
     color: "#D9D9D9",
-    fontSize: 16,
+    fontSize: 15,
     fontWeight: "500",
   },
   languageItemTextActive: {
-    fontStyle: "italic",
-    opacity: 0.5,
-    color: "#FFFFFF",
+    color: "#050505",
   },
   drawerItem: {
     flexDirection: "row",
@@ -834,6 +1034,11 @@ const styles = StyleSheet.create({
     lineHeight: 25,
     marginTop: 8,
     textAlign: "center",
+  },
+  feedFooter: {
+    paddingVertical: 20,
+    alignItems: "center",
+    justifyContent: "center",
   },
   webviewHeader: {
     flexDirection: "row",

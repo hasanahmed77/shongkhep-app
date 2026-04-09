@@ -10,6 +10,7 @@ export type Category =
 
 export type NewsCard = {
   id: string;
+  cursor: string;
   category: Exclude<Category, "All">;
   imageUrl: string;
   sourceName: string;
@@ -17,4 +18,5 @@ export type NewsCard = {
   title: string;
   summary: string;
   articleBody: string;
+  publishedAt: string | null;
 };

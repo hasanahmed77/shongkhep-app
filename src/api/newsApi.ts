@@ -14,6 +14,7 @@ const API_BASE_URL =
 
 type FeedArticle = {
   id: string;
+  cursor: string;
   category: string;
   image_url: string | null;
   source_name: string;
@@ -27,7 +28,22 @@ type FeedArticle = {
 type FeedResponse = {
   language: Language;
   updated_at: string;
+  has_more: boolean;
+  next_cursor: string | null;
   articles: FeedArticle[];
+};
+
+type FeedUpdatesResponse = {
+  language: Language;
+  has_new: boolean;
+  new_count: number;
+  latest_cursor: string | null;
+};
+
+type FetchFeedOptions = {
+  limit?: number;
+  before?: string | null;
+  after?: string | null;
 };
 
 export async function syncNewsFeed(
@@ -50,8 +66,26 @@ export async function syncNewsFeed(
 export async function fetchNewsFeed(
   language: Language,
   category: Category,
-): Promise<{ articles: NewsCard[]; endpointLabel: string; fallback: boolean }> {
-  const query = category === "All" ? "" : `?category=${encodeURIComponent(category)}`;
+  options: FetchFeedOptions = {},
+): Promise<{
+  articles: NewsCard[];
+  endpointLabel: string;
+  fallback: boolean;
+  hasMore: boolean;
+  nextCursor: string | null;
+}> {
+  const params = new URLSearchParams();
+  if (category !== "All") {
+    params.set("category", category);
+  }
+  params.set("limit", String(options.limit ?? 10));
+  if (options.before) {
+    params.set("before", options.before);
+  }
+  if (options.after) {
+    params.set("after", options.after);
+  }
+  const query = `?${params.toString()}`;
   const url = `${API_BASE_URL}${ENDPOINTS[language]}${query}`;
   const response = await fetch(url);
   if (!response.ok) {
@@ -63,12 +97,37 @@ export async function fetchNewsFeed(
     articles: payload.articles.map(mapFeedArticle),
     endpointLabel: `${ENDPOINTS[language]}${query}`,
     fallback: false,
+    hasMore: payload.has_more,
+    nextCursor: payload.next_cursor,
+  };
+}
+
+export async function fetchFeedUpdates(
+  language: Language,
+  category: Category,
+  after: string,
+): Promise<{ hasNew: boolean; newCount: number; latestCursor: string | null }> {
+  const params = new URLSearchParams({ after });
+  if (category !== "All") {
+    params.set("category", category);
+  }
+  const url = `${API_BASE_URL}${ENDPOINTS[language]}/updates?${params.toString()}`;
+  const response = await fetch(url);
+  if (!response.ok) {
+    throw new Error(`Updates request failed with status ${response.status}`);
+  }
+  const payload = (await response.json()) as FeedUpdatesResponse;
+  return {
+    hasNew: payload.has_new,
+    newCount: payload.new_count,
+    latestCursor: payload.latest_cursor,
   };
 }
 
 function mapFeedArticle(article: FeedArticle): NewsCard {
   return {
     id: article.id,
+    cursor: article.cursor,
     category: normalizeCategory(article.category),
     imageUrl:
       article.image_url ??
@@ -78,6 +137,7 @@ function mapFeedArticle(article: FeedArticle): NewsCard {
     title: article.title,
     summary: article.summary,
     articleBody: article.article_body,
+    publishedAt: article.published_at,
   };
 }
 
