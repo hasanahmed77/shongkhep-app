@@ -1,6 +1,7 @@
 import { LinearGradient } from "expo-linear-gradient";
 import * as NavigationBar from "expo-navigation-bar";
-import { StatusBar } from "expo-status-bar";
+import * as Sharing from "expo-sharing";
+import { setStatusBarHidden, StatusBar } from "expo-status-bar";
 import * as SystemUI from "expo-system-ui";
 import { Feather, Ionicons } from "@expo/vector-icons";
 import React, { useRef, useState } from "react";
@@ -12,6 +13,7 @@ import {
 import {
   Animated,
   ActivityIndicator,
+  AppState,
   Alert,
   Dimensions,
   FlatList,
@@ -25,8 +27,10 @@ import {
   Share,
   StyleSheet,
   Text,
+  useWindowDimensions,
   View,
 } from "react-native";
+import { captureRef } from "react-native-view-shot";
 import { WebView } from "react-native-webview";
 import { fetchFeedUpdates, fetchNewsFeed } from "./src/api/newsApi";
 import { Category, Language, NewsCard, Vertical } from "./src/types";
@@ -110,12 +114,18 @@ function NewsScreen({
   onOpenSource,
   onOpenMenu,
   onReload,
+  onShare,
+  bindCaptureRef,
+  sharingDisabled,
 }: {
   item: NewsCard;
   viewportHeight: number;
   onOpenSource: (article: NewsCard) => void;
   onOpenMenu: () => void;
   onReload: () => void;
+  onShare: (article: NewsCard) => void;
+  bindCaptureRef: (id: string, node: React.ElementRef<typeof View> | null) => void;
+  sharingDisabled: boolean;
 }) {
   const gestureProgress = useRef(new Animated.Value(0)).current;
   const handleOpenSource = () => {
@@ -151,7 +161,11 @@ function NewsScreen({
       ]}
       {...edgePanResponder.panHandlers}
     >
-      <View style={styles.cardShell}>
+      <View
+        ref={(node) => bindCaptureRef(item.id, node)}
+        collapsable={false}
+        style={styles.cardShell}
+      >
         <ImageBackground source={{ uri: item.imageUrl }} style={styles.heroImage}>
           <LinearGradient
             colors={["rgba(0,0,0,0)", "rgba(0,0,0,0.08)", "rgba(0,0,0,0.72)"]}
@@ -163,8 +177,12 @@ function NewsScreen({
         <View style={styles.contentBlock}>
           <View style={styles.copyBlock}>
             <Text style={styles.kicker}>{item.category}</Text>
-            <Text style={styles.headline}>{item.title}</Text>
-            <Text style={styles.summary}>{item.summary}</Text>
+            <Text style={styles.headline} numberOfLines={4}>
+              {item.title}
+            </Text>
+            <Text style={styles.summary} numberOfLines={7}>
+              {item.summary}
+            </Text>
           </View>
 
           <View style={styles.footerRow}>
@@ -184,12 +202,9 @@ function NewsScreen({
               </Pressable>
 
               <Pressable
-                style={styles.iconAction}
-                onPress={() =>
-                  Share.share({
-                    message: `${item.title}\n\n${item.summary}\n\nSource: ${item.sourceUrl}`,
-                  })
-                }
+                style={[styles.iconAction, sharingDisabled && styles.iconActionDisabled]}
+                onPress={() => void onShare(item)}
+                disabled={sharingDisabled}
               >
                 <Ionicons name="share-social-outline" size={22} color="#FFFFFF" />
               </Pressable>
@@ -254,6 +269,7 @@ function EmptyNewsScreen({
 
 function AppContent() {
   const insets = useSafeAreaInsets();
+  const windowDimensions = useWindowDimensions();
   const listRef = useRef<FlatList<NewsCard>>(null);
   const [language, setLanguage] = useState<Language>("en");
   const [selectedVertical, setSelectedVertical] = useState<Vertical>("news");
@@ -269,13 +285,96 @@ function AppContent() {
   const [pendingStoryCount, setPendingStoryCount] = useState(0);
   const [hasMore, setHasMore] = useState(true);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
-  const [viewportHeight, setViewportHeight] = useState(height);
   const [currentIndex, setCurrentIndex] = useState(0);
+  const [isSharing, setIsSharing] = useState(false);
   const drawerX = useRef(new Animated.Value(-DRAWER_WIDTH)).current;
   const drawerGesture = useRef(new Animated.Value(0)).current;
   const chipVisibility = useRef(new Animated.Value(0)).current;
+  const cardCaptureRefs = useRef(new Map<string, React.ElementRef<typeof View> | null>()).current;
   const activeCategories = categoryOptions[selectedVertical];
   const supportedVerticals = supportedVerticalsByLanguage[language];
+  const viewportHeight = Math.max(windowDimensions.height - insets.top, 1);
+  const previousViewportHeight = useRef(viewportHeight);
+
+  const alignToCurrentCard = React.useCallback(() => {
+    if (news.length === 0) {
+      return;
+    }
+    listRef.current?.scrollToOffset({
+      offset: currentIndex * viewportHeight,
+      animated: false,
+    });
+  }, [currentIndex, news.length, viewportHeight]);
+
+  const applySystemBars = React.useCallback(() => {
+    void SystemUI.setBackgroundColorAsync("#000000");
+    setStatusBarHidden(false, "none");
+
+    if (Platform.OS !== "android") {
+      return;
+    }
+
+    void NavigationBar.setVisibilityAsync("visible");
+    void NavigationBar.setButtonStyleAsync("light");
+  }, []);
+
+  const bindCaptureRef = React.useCallback(
+    (id: string, node: React.ElementRef<typeof View> | null) => {
+      if (node) {
+        cardCaptureRefs.set(id, node);
+        return;
+      }
+      cardCaptureRefs.delete(id);
+    },
+    [cardCaptureRefs],
+  );
+
+  const shareFallbackMessage = React.useCallback((item: NewsCard) => {
+    return `${item.title}\n\n${item.summary}\n\nSource: ${item.sourceUrl}`;
+  }, []);
+
+  const handleShare = React.useCallback(
+    async (item: NewsCard) => {
+      if (isSharing) {
+        return;
+      }
+
+      setIsSharing(true);
+      try {
+        const captureTarget = cardCaptureRefs.get(item.id);
+        if (!captureTarget) {
+          throw new Error("Capture target unavailable");
+        }
+
+        const sharingAvailable = await Sharing.isAvailableAsync();
+        if (!sharingAvailable) {
+          await Share.share({ message: shareFallbackMessage(item) });
+          return;
+        }
+
+        const imageUri = await captureRef(captureTarget, {
+          format: "png",
+          quality: 1,
+          result: "tmpfile",
+        });
+
+        await Sharing.shareAsync(imageUri, {
+          mimeType: "image/png",
+          dialogTitle: "Share story card",
+        });
+      } catch (error) {
+        console.warn("Failed to share story card", error);
+        try {
+          await Share.share({ message: shareFallbackMessage(item) });
+        } catch {
+          Alert.alert("Share unavailable", "Could not share this story right now.");
+        }
+      } finally {
+        setIsSharing(false);
+      }
+    },
+    [cardCaptureRefs, isSharing, shareFallbackMessage],
+  );
 
   const toggleDrawer = (open: boolean) => {
     setIsDrawerOpen(open);
@@ -457,19 +556,29 @@ function AppContent() {
   }, [refreshFeed]);
 
   React.useEffect(() => {
-    void SystemUI.setBackgroundColorAsync("#000000");
-  }, []);
+    applySystemBars();
+  }, [applySystemBars]);
 
   React.useEffect(() => {
-    if (Platform.OS !== "android") {
+    const subscription = AppState.addEventListener("change", (nextState) => {
+      if (nextState === "active") {
+        applySystemBars();
+        requestAnimationFrame(alignToCurrentCard);
+        setTimeout(alignToCurrentCard, 120);
+        setTimeout(alignToCurrentCard, 320);
+      }
+    });
+
+    return () => subscription.remove();
+  }, [alignToCurrentCard, applySystemBars]);
+
+  React.useEffect(() => {
+    if (Math.abs(previousViewportHeight.current - viewportHeight) < 1) {
       return;
     }
-
-    void NavigationBar.setPositionAsync("absolute");
-    void NavigationBar.setBehaviorAsync("overlay-swipe");
-    void NavigationBar.setBackgroundColorAsync("#000000");
-    void NavigationBar.setButtonStyleAsync("light");
-  }, []);
+    previousViewportHeight.current = viewportHeight;
+    requestAnimationFrame(alignToCurrentCard);
+  }, [alignToCurrentCard, viewportHeight]);
 
   return (
     <SafeAreaView style={styles.safeArea} edges={[]}>
@@ -477,12 +586,6 @@ function AppContent() {
 
       <View
         style={[styles.app, { paddingTop: insets.top }]}
-        onLayout={(event) => {
-          const nextHeight = event.nativeEvent.layout.height;
-          if (Math.abs(nextHeight - viewportHeight) > 1) {
-            setViewportHeight(nextHeight);
-          }
-        }}
       >
         {hasNewStories ? (
           <Animated.View
@@ -533,6 +636,9 @@ function AppContent() {
                 onReload={() => {
                   void refreshFeed({ silent: true });
                 }}
+                onShare={handleShare}
+                bindCaptureRef={bindCaptureRef}
+                sharingDisabled={isSharing}
               />
             )}
             onViewableItemsChanged={({ viewableItems }) => {
@@ -866,10 +972,10 @@ const styles = StyleSheet.create({
     paddingHorizontal: 28,
     paddingTop: 28,
     paddingBottom: 38,
-    justifyContent: "space-between",
   },
   copyBlock: {
     maxWidth: width - 72,
+    flexShrink: 1,
   },
   kicker: {
     color: "#7E7E7E",
@@ -897,7 +1003,7 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    marginTop: 28,
+    marginTop: "auto",
     paddingHorizontal: 18,
     paddingBottom: 8,
   },
@@ -931,6 +1037,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: 2,
     alignItems: "center",
     justifyContent: "center",
+  },
+  iconActionDisabled: {
+    opacity: 0.45,
   },
   drawerOverlay: {
     ...StyleSheet.absoluteFillObject,
