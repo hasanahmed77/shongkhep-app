@@ -39,6 +39,10 @@ const verticals: { id: Vertical; label: string }[] = [
   { id: "science", label: "Science" },
   { id: "gaming", label: "Gaming" },
 ];
+const supportedVerticalsByLanguage: Record<Language, Vertical[]> = {
+  en: ["news", "tech", "science", "gaming"],
+  bn: ["news"],
+};
 
 const categoryOptions: Record<Vertical, Category[]> = {
   news: ["All", "World", "Politics", "Business", "Technology", "Sports"],
@@ -271,6 +275,7 @@ function AppContent() {
   const drawerGesture = useRef(new Animated.Value(0)).current;
   const chipVisibility = useRef(new Animated.Value(0)).current;
   const activeCategories = categoryOptions[selectedVertical];
+  const supportedVerticals = supportedVerticalsByLanguage[language];
 
   const toggleDrawer = (open: boolean) => {
     setIsDrawerOpen(open);
@@ -633,6 +638,9 @@ function AppContent() {
                     ]}
                     onPress={() => {
                       setLanguage(option);
+                      setSelectedVertical("news");
+                      setExpandedVertical("news");
+                      setSelectedCategory("All");
                       toggleDrawer(false);
                     }}
                   >
@@ -650,7 +658,9 @@ function AppContent() {
             </View>
 
             <View style={styles.drawerSection}>
-              {verticals.map((vertical) => {
+              {verticals
+                .filter((vertical) => supportedVerticals.includes(vertical.id))
+                .map((vertical) => {
                 const isActive = vertical.id === selectedVertical;
                 const isExpanded = vertical.id === expandedVertical;
                 const categoriesForVertical = categoryOptions[vertical.id];
@@ -659,9 +669,12 @@ function AppContent() {
                     <Pressable
                       style={styles.drawerDropdownHeader}
                       onPress={() => {
+                        setSelectedVertical(vertical.id);
+                        setSelectedCategory("All");
                         setExpandedVertical((current) =>
                           current === vertical.id ? null : vertical.id,
                         );
+                        toggleDrawer(false);
                       }}
                     >
                       <View style={styles.drawerDropdownLabelWrap}>

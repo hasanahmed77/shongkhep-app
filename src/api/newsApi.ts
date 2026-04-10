@@ -1,4 +1,5 @@
 import { Platform } from "react-native";
+import { resolveFallbackImage } from "../fallbackImages";
 import { Category, Language, NewsCard, Vertical } from "../types";
 
 const ENDPOINTS: Record<Language, string> = {
@@ -132,14 +133,12 @@ export async function fetchFeedUpdates(
 
 function mapFeedArticle(article: FeedArticle): NewsCard {
   const vertical = normalizeVertical(article.vertical);
-  return {
+  const mapped: NewsCard = {
     id: article.id,
     cursor: article.cursor,
     vertical,
     category: normalizeCategory(article.category, vertical),
-    imageUrl:
-      article.image_url ??
-      "https://images.unsplash.com/photo-1495020689067-958852a7765e?auto=format&fit=crop&w=1200&q=80",
+    imageUrl: article.image_url ?? "",
     sourceName: article.source_name,
     sourceUrl: article.source_url,
     title: article.title,
@@ -147,6 +146,8 @@ function mapFeedArticle(article: FeedArticle): NewsCard {
     articleBody: article.article_body,
     publishedAt: article.published_at,
   };
+  mapped.imageUrl = article.image_url ?? resolveFallbackImage(mapped);
+  return mapped;
 }
 
 function normalizeCategory(category: string, vertical: Vertical): NewsCard["category"] {
